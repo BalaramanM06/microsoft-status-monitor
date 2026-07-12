@@ -44,6 +44,12 @@ export async function verifySession(context: BrowserContext): Promise<boolean> {
     }
 
     if (url.includes("apply.careers.microsoft.com")) {
+      // Check if it's actually a login page (not the applications page)
+      const content = await page.content();
+      if (content.includes("Sign in using") || content.includes("sign-in")) {
+        logger.warn("Session expired - redirected to login page");
+        return false;
+      }
       logger.info("Session is valid");
       return true;
     }
