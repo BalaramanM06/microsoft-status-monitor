@@ -1,11 +1,11 @@
 import fs from "fs";
 import cron from "node-cron";
-import { chromium, BrowserContext } from "playwright";
+import { Browser, BrowserContext } from "playwright";
 import { Config, MonitorResult, StatusChange, Application } from "./types";
 import { Storage } from "./storage";
 import { TelegramNotifier } from "./telegram";
 import { fetchApplications, detectChanges, takeScreenshot } from "./monitor";
-import { verifySession } from "./auth";
+import { createAuthenticatedContext, verifySession } from "./auth";
 import { logger } from "./logger";
 
 export class Scheduler {
@@ -13,6 +13,7 @@ export class Scheduler {
   private storage: Storage;
   private telegram: TelegramNotifier;
   private cronJob: cron.ScheduledTask | null = null;
+  private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private heartbeatDay: string = "";
 
@@ -155,22 +156,13 @@ export class Scheduler {
   private async initializeContext(): Promise<void> {
     logger.info("Launching browser...");
 
-    const hasAuthState = fs.existsSync(this.config.authStatePath);
-
-    if (!hasAuthState) {
-      throw new Error(
-        "No auth.json found. Please run `npm run login` first to authenticate."
-      );
-    }
-
-    this.context = await chromium.launchPersistentContext(
+    const { browser, context } = await createAuthenticatedContext(
       this.config.authStatePath,
-      {
-        headless: this.config.headless,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      }
+      this.config.headless
     );
 
+    this.browser = browser;
+    this.context = context;
     logger.info("Browser context initialized with saved session");
   }
 
@@ -183,6 +175,10 @@ export class Scheduler {
     if (this.context) {
       await this.context.close();
       this.context = null;
+    }
+    if (this.browser) {
+      await this.browser.close();
+      this.browser = null;
     }
     logger.info("Scheduler stopped.");
   }

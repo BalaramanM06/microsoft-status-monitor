@@ -1,4 +1,4 @@
-import { chromium, BrowserContext } from "playwright";
+import { chromium, Browser, BrowserContext } from "playwright";
 import fs from "fs";
 import { logger } from "./logger";
 
@@ -8,54 +8,21 @@ const CAREERS_URL =
 export async function createAuthenticatedContext(
   authStatePath: string,
   headless: boolean
-): Promise<{ context: BrowserContext; needsLogin: boolean }> {
-  const hasAuthState = fs.existsSync(authStatePath);
-
-  if (hasAuthState) {
-    logger.info("Found existing auth state, attempting to reuse...");
-    const context = await chromium.launchPersistentContext(authStatePath, {
-      headless,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-    return { context, needsLogin: false };
-  }
-
-  logger.info("No auth state found, will need manual login");
-  const context = await chromium.launchPersistentContext(authStatePath, {
-    headless: false,
+): Promise<{ browser: Browser; context: BrowserContext }> {
+  const browser = await chromium.launch({
+    headless,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
-  return { context, needsLogin: true };
-}
 
-export async function performLogin(context: BrowserContext): Promise<boolean> {
-  const page = await context.newPage();
-
-  try {
-    logger.info("Navigating to Microsoft Careers portal...");
-    await page.goto(CAREERS_URL, { waitUntil: "networkidle", timeout: 60000 });
-
-    logger.info("╔══════════════════════════════════════════════════╗");
-    logger.info("║   Please log in manually in the browser window  ║");
-    logger.info("║   Press ENTER in the terminal when done.        ║");
-    logger.info("╚══════════════════════════════════════════════════╝");
-
-    await waitForUserInput();
-
-    const url = page.url();
-    if (url.includes("apply.careers.microsoft.com")) {
-      logger.info("Login appears successful. Saving session...");
-      return true;
-    }
-
-    logger.warn("Page URL does not indicate successful login. Continuing anyway...");
-    return true;
-  } catch (err) {
-    logger.error("Login failed", err as Error);
-    return false;
-  } finally {
-    await page.close();
+  if (fs.existsSync(authStatePath)) {
+    logger.info("Found existing auth state, attempting to reuse...");
+    const context = await browser.newContext({ storageState: authStatePath });
+    return { browser, context };
   }
+
+  logger.info("No auth state found. Run 'npm run login' first.");
+  await browser.close();
+  throw new Error("No auth.json found. Run 'npm run login' first to authenticate.");
 }
 
 export async function verifySession(context: BrowserContext): Promise<boolean> {
@@ -114,13 +81,14 @@ async function main() {
     process.exit(0);
   }
 
-  logger.info("Launching browser for manual login...");
-  const context = await chromium.launchPersistentContext(authStatePath, {
+  const browser = await chromium.launch({
     headless: false,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
+  const context = await browser.newContext();
   const page = await context.newPage();
+
   logger.info("Navigating to Microsoft Careers...");
   await page.goto(CAREERS_URL, { waitUntil: "networkidle", timeout: 60000 });
 
@@ -133,10 +101,13 @@ async function main() {
 
   await waitForUserInput();
 
+  await context.storageState({ path: authStatePath });
+  logger.info("Session saved to auth.json");
+
   await page.close();
   await context.close();
+  await browser.close();
 
-  logger.info("Session saved to auth.json");
   logger.info("Run 'npm start' to begin monitoring");
 }
 
