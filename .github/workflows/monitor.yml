@@ -30,21 +30,17 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Restore auth state
-        uses: actions/cache@v4
-        with:
-          path: auth.json
-          key: ms-careers-auth-${{ secrets.AUTH_STATE_HASH }}
-          restore-keys: |
-            ms-careers-auth-
+      - name: Decode auth.json
+        if: ${{ secrets.AUTH_JSON != '' }}
+        run: echo "${{ secrets.AUTH_JSON }}" | base64 -d > auth.json
 
       - name: Restore previous state
         uses: actions/cache@v4
         with:
           path: state.json
-          key: ms-careers-state
+          key: ms-careers-state-${{ github.run_id }}
           restore-keys: |
-            ms-careers-state
+            ms-careers-state-
 
       - name: Build
         run: npm run build
