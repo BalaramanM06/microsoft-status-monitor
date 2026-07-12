@@ -1,30 +1,28 @@
-import { BrowserContext } from "playwright";
+import { BrowserContext, Route, Response } from "playwright";
 import path from "path";
 import fs from "fs";
-import { Application, StatusChange, MonitorResult } from "./types";
+import { Application, StatusChange } from "./types";
 import { Storage } from "./storage";
 import { logger } from "./logger";
 
-const API_URL =
-  "https://apply.careers.microsoft.com/api/pcsx/dashboard/applications";
+const CAREERS_URL =
+  "https://apply.careers.microsoft.com/careers/applications?hl=en&domain=microsoft.com";
+const API_PATTERN = "**/api/pcsx/dashboard/applications";
+
+interface ApiApp {
+  applicationId?: string;
+  positionTitle?: string;
+  currentStatus?: string;
+  displayJobId?: string;
+  positionLocation?: string;
+  appliedOn?: string;
+  pid?: number;
+}
 
 interface ApiResponse {
-  status?: number;
   data?: {
-    applications?: Array<{
-      applicationId?: string;
-      positionTitle?: string;
-      currentStatus?: string;
-      displayJobId?: string;
-      positionLocation?: string;
-      appliedOn?: string;
-      pid?: number;
-      isReferral?: boolean;
-      allowWithdraw?: boolean;
-      [key: string]: unknown;
-    }>;
+    applications?: ApiApp[];
   };
-  [key: string]: unknown;
 }
 
 export async function fetchApplications(
@@ -33,27 +31,35 @@ export async function fetchApplications(
   const page = await context.newPage();
 
   try {
-    logger.info("Fetching applications from API...");
+    logger.info("Fetching applications by intercepting API response...");
 
-    // Navigate to careers page first to establish cookies
-    await page.goto(
-      "https://apply.careers.microsoft.com/careers/applications?hl=en&domain=microsoft.com",
-      { waitUntil: "networkidle", timeout: 30000 }
-    );
+    let capturedData: ApiResponse | null = null;
 
-    // Now fetch API from same origin (cookies included automatically)
-    const data = (await page.evaluate(async (url) => {
-      const res = await fetch(url, { credentials: "same-origin" });
-      return res.json();
-    }, API_URL)) as ApiResponse;
+    // Intercept the API response
+    await page.route(API_PATTERN, async (route: Route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      capturedData = body as ApiResponse;
+      await route.fulfill({ response });
+    });
 
-    logger.debug(`API response keys: ${Object.keys(data)}`);
+    // Navigate to the page - this triggers the API call
+    await page.goto(CAREERS_URL, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    });
 
-    if (data.data) {
-      logger.debug(`data.applications length: ${Array.isArray(data.data.applications) ? data.data.applications.length : "not array"}`);
+    // Remove route
+    await page.unroute(API_PATTERN);
+
+    if (!capturedData) {
+      logger.warn("No API response captured");
+      return [];
     }
 
-    return parseApplications(data);
+    logger.debug(`Captured API response keys: ${Object.keys(capturedData)}`);
+
+    return parseApplications(capturedData);
   } catch (err) {
     logger.error("Failed to fetch applications", err as Error);
     throw err;
@@ -65,14 +71,17 @@ export async function fetchApplications(
 function parseApplications(data: ApiResponse): Application[] {
   const apps = data.data?.applications;
 
-  if (!apps || !Array.isArray(apps)) {
-    const dataStr = data.data ? JSON.stringify(data.data).substring(0, 200) : "undefined";
-    logger.warn(`No applications found. data.data: ${dataStr}`);
+  if (!apps || !Array.isArray(apps) || apps.length === 0) {
+    logger.warn("No applications found in API response");
     return [];
   }
 
+  logger.info(`Parsed ${apps.length} application(s)`);
+
   return apps.map((item) => ({
-    id: item.applicationId ?? String(item.pid ?? Math.random().toString(36).slice(2, 8)),
+    id:
+      item.applicationId ??
+      String(item.pid ?? Math.random().toString(36).slice(2, 8)),
     jobTitle: item.positionTitle ?? "Unknown Position",
     status: item.currentStatus ?? "Unknown",
     interviewStage: undefined,
@@ -133,10 +142,10 @@ export async function takeScreenshot(
     }
 
     const page = await context.newPage();
-    await page.goto(
-      "https://apply.careers.microsoft.com/careers/applications?hl=en&domain=microsoft.com",
-      { waitUntil: "networkidle", timeout: 30000 }
-    );
+    await page.goto(CAREERS_URL, {
+      waitUntil: "networkidle",
+      timeout: 30000,
+    });
 
     const filename = `status-change-${applicationId}-${Date.now()}.png`;
     const filePath = path.join(screenshotDir, filename);
