@@ -1,4 +1,4 @@
-import { BrowserContext, Route, Response } from "playwright";
+import { BrowserContext } from "playwright";
 import path from "path";
 import fs from "fs";
 import { Application, StatusChange } from "./types";
@@ -7,7 +7,6 @@ import { logger } from "./logger";
 
 const CAREERS_URL =
   "https://apply.careers.microsoft.com/careers/applications?hl=en&domain=microsoft.com";
-const API_PATTERN = "**/api/pcsx/dashboard/applications";
 
 interface ApiApp {
   applicationId?: string;
@@ -31,35 +30,32 @@ export async function fetchApplications(
   const page = await context.newPage();
 
   try {
-    logger.info("Fetching applications by intercepting API response...");
+    logger.info("Navigating to applications page...");
 
-    let capturedData: ApiResponse | null = null;
+    // Wait for the API response that contains application data
+    const responsePromise = page.waitForResponse(
+      (res) =>
+        res.url().includes("/api/pcsx/dashboard/applications") ||
+        res.url().includes("/api/pcsx/dashboard"),
+      { timeout: 30000 }
+    );
 
-    // Intercept the API response
-    await page.route(API_PATTERN, async (route: Route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      capturedData = body as ApiResponse;
-      await route.fulfill({ response });
-    });
-
-    // Navigate to the page - this triggers the API call
+    // Navigate to the page
     await page.goto(CAREERS_URL, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000,
     });
 
-    // Remove route
-    await page.unroute(API_PATTERN);
+    // Wait for the API response
+    const response = await responsePromise;
 
-    if (!capturedData) {
-      logger.warn("No API response captured");
+    if (!response.ok()) {
+      logger.warn(`API response not OK: ${response.status()}`);
       return [];
     }
 
-    logger.debug(`Captured API response keys: ${Object.keys(capturedData)}`);
-
-    return parseApplications(capturedData);
+    const data = (await response.json()) as ApiResponse;
+    return parseApplications(data);
   } catch (err) {
     logger.error("Failed to fetch applications", err as Error);
     throw err;
@@ -76,7 +72,7 @@ function parseApplications(data: ApiResponse): Application[] {
     return [];
   }
 
-  logger.info(`Parsed ${apps.length} application(s)`);
+  logger.info(`Found ${apps.length} application(s)`);
 
   return apps.map((item) => ({
     id:
