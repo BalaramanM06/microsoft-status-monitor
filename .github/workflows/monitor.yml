@@ -31,8 +31,10 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Decode auth.json
-        if: ${{ secrets.AUTH_JSON != '' }}
-        run: echo "${{ secrets.AUTH_JSON }}" | base64 -d > auth.json
+        if: ${{ env.AUTH_JSON != '' }}
+        env:
+          AUTH_JSON: ${{ secrets.AUTH_JSON }}
+        run: echo "$AUTH_JSON" | base64 -d > auth.json
 
       - name: Restore previous state
         uses: actions/cache@v4
