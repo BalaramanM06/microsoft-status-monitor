@@ -1,0 +1,7 @@
+node_modules/
+dist/
+auth.json
+state.json
+.env
+*.log
+screenshots/

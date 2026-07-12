@@ -1,0 +1,69 @@
+name: Microsoft Careers Status Monitor
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'tsconfig.json'
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore auth state
+        uses: actions/cache@v4
+        with:
+          path: auth.json
+          key: ms-careers-auth-${{ secrets.AUTH_STATE_HASH }}
+          restore-keys: |
+            ms-careers-auth-
+
+      - name: Restore previous state
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: ms-careers-state
+          restore-keys: |
+            ms-careers-state
+
+      - name: Build
+        run: npm run build
+
+      - name: Run monitor
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HEADLESS: 'true'
+          CHECK_INTERVAL: '30'
+        run: node dist/index.js
+
+      - name: Save state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.json
+          key: ms-careers-state-${{ github.run_id }}
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf screenshots/
