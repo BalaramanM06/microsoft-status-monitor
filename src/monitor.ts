@@ -35,30 +35,36 @@ export async function fetchApplications(
   try {
     logger.info("Fetching applications from API...");
 
-    // Navigate to the careers page first to establish session
-    await page.goto(
-      "https://apply.careers.microsoft.com/careers/applications?hl=en&domain=microsoft.com",
-      { waitUntil: "networkidle", timeout: 30000 }
-    );
+    const response = await context.request.get(API_URL, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
 
-    // Make API request from within the page context (includes cookies)
-    const data = (await page.evaluate(async (url) => {
-      const response = await fetch(url, {
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-      return response.json();
-    }, API_URL)) as ApiResponse;
+    if (!response.ok()) {
+      throw new Error(`API returned status ${response.status()}`);
+    }
 
-    logger.debug(`API response keys: ${JSON.stringify(Object.keys(data))}`);
+    const text = await response.text();
+
+    // Check if response is a login redirect
+    if (text.includes("/login")) {
+      logger.warn("API returned login redirect - session may be expired");
+      return [];
+    }
+
+    let data: ApiResponse;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      logger.error(`API response is not JSON: ${text.substring(0, 200)}`);
+      return [];
+    }
+
+    logger.debug(`API response keys: ${Object.keys(data)}`);
 
     if (data.data) {
-      logger.debug(`data.applications type: ${typeof data.data.applications}, isArray: ${Array.isArray(data.data.applications)}`);
-      if (Array.isArray(data.data.applications)) {
-        logger.debug(`data.applications.length: ${data.data.applications.length}`);
-      }
+      logger.debug(`data.applications length: ${Array.isArray(data.data.applications) ? data.data.applications.length : "not array"}`);
     }
 
     return parseApplications(data);
