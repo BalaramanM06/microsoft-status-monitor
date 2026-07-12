@@ -35,31 +35,17 @@ export async function fetchApplications(
   try {
     logger.info("Fetching applications from API...");
 
-    const response = await context.request.get(API_URL, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
+    // Navigate to careers page first to establish cookies
+    await page.goto(
+      "https://apply.careers.microsoft.com/careers/applications?hl=en&domain=microsoft.com",
+      { waitUntil: "networkidle", timeout: 30000 }
+    );
 
-    if (!response.ok()) {
-      throw new Error(`API returned status ${response.status()}`);
-    }
-
-    const text = await response.text();
-
-    // Check if response is a login redirect
-    if (text.includes("/login")) {
-      logger.warn("API returned login redirect - session may be expired");
-      return [];
-    }
-
-    let data: ApiResponse;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      logger.error(`API response is not JSON: ${text.substring(0, 200)}`);
-      return [];
-    }
+    // Now fetch API from same origin (cookies included automatically)
+    const data = (await page.evaluate(async (url) => {
+      const res = await fetch(url, { credentials: "same-origin" });
+      return res.json();
+    }, API_URL)) as ApiResponse;
 
     logger.debug(`API response keys: ${Object.keys(data)}`);
 
