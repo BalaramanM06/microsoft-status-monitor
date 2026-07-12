@@ -46,7 +46,17 @@ export async function fetchApplications(
       throw new Error(`API returned status ${response.status()}`);
     }
 
-    const data = (await response.json()) as ApiResponse;
+    const text = await response.text();
+    logger.debug(`API raw response (first 500 chars): ${text.substring(0, 500)}`);
+
+    let data: ApiResponse;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      logger.error(`API response is not JSON: ${text.substring(0, 200)}`);
+      return [];
+    }
+
     logger.debug(`API response keys: ${JSON.stringify(Object.keys(data))}`);
     if (data.data) {
       logger.debug(`data.applications type: ${typeof data.data.applications}, isArray: ${Array.isArray(data.data.applications)}`);
@@ -67,7 +77,8 @@ function parseApplications(data: ApiResponse): Application[] {
   const apps = data.data?.applications;
 
   if (!apps || !Array.isArray(apps)) {
-    logger.warn(`No applications found. data.data: ${JSON.stringify(data.data).substring(0, 200)}`);
+    const dataStr = data.data ? JSON.stringify(data.data).substring(0, 200) : "undefined";
+    logger.warn(`No applications found. data.data: ${dataStr}`);
     return [];
   }
 
