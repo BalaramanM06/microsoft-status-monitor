@@ -47,6 +47,13 @@ export async function fetchApplications(
     }
 
     const data = (await response.json()) as ApiResponse;
+    logger.debug(`API response keys: ${JSON.stringify(Object.keys(data))}`);
+    if (data.data) {
+      logger.debug(`data.applications type: ${typeof data.data.applications}, isArray: ${Array.isArray(data.data.applications)}`);
+      if (Array.isArray(data.data.applications)) {
+        logger.debug(`data.applications.length: ${data.data.applications.length}`);
+      }
+    }
     return parseApplications(data);
   } catch (err) {
     logger.error("Failed to fetch applications", err as Error);
@@ -60,7 +67,7 @@ function parseApplications(data: ApiResponse): Application[] {
   const apps = data.data?.applications;
 
   if (!apps || !Array.isArray(apps)) {
-    logger.warn("No applications found in API response");
+    logger.warn(`No applications found. data.data: ${JSON.stringify(data.data).substring(0, 200)}`);
     return [];
   }
 
